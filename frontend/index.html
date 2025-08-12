@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>证件打印系统</title>
+    <script>
+        // 创建通知系统
+        function showNotification(message, type = 'info', duration = 2000) {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${getNotificationColor(type)};
+                color: white;
+                padding: 15px 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                font-size: 14px;
+                z-index: 10000;
+                max-width: 400px;
+                opacity: 0;
+                transform: translateX(100px);
+                transition: all 0.3s ease;
+                white-space: pre-line;
+            `;
+            
+            notification.innerHTML = message;
+            document.body.appendChild(notification);
+            
+            // 动画显示
+            setTimeout(() => {
+                notification.style.opacity = '1';
+                notification.style.transform = 'translateX(0)';
+            }, 10);
+            
+            // 自动消失
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                notification.style.transform = 'translateX(100px)';
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, duration);
+        }
+        
+        function getNotificationColor(type) {
+            switch(type) {
+                case 'success': return '#4caf50';
+                case 'error': return '#f44336';
+                case 'warning': return '#ff9800';
+                case 'info':
+                default: return '#2196f3';
+            }
+        }
+        
+        // 文件列表缓存
+        let cachedFileList = null;
+        
+        // PDF预览功能
+        function showFileExplorer() {
+            // 如果有缓存的文件列表，直接使用缓存
+            if (cachedFileList && cachedFileList.length > 0) {
+                displayFileExplorer(cachedFileList);
+                return;
+            }
+            
+            // 先获取所有PDF文件列表
+            fetch('http://localhost:8000/status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.pdf_files && data.pdf_files.length > 0) {
+                    // 缓存文件列表
+                    cachedFileList = data.pdf_files;
+                    displayFileExplorer(data.pdf_files);
+                } else {
+                    showNotification('没有找到可预览的文件', 'warning');
+                }
+            })
+            .catch(error => {
+                console.error('获取文件列表失败:', error);
+                showNotification('获取文件列表失败', 'error');
+            });
+        }
+        
+        // 清空文件列表缓存
+        function clearFileListCache() {
+            cachedFileList = null;
+        }
+        
+        function displayFileExplorer(files) {
+            // 关闭任何现有的文件浏览器窗口
+            const existingModals = document.querySelectorAll('[data-modal-type="file-explorer"]');
+            existingModals.forEach(modal => {
+                if (modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            });
+            
+            // 创建文件浏览器模态框
+            const modal = document.createElement('div');
+            modal.setAttribute('data-modal-type', 'file-explorer');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                z-index: 20000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            `;
+            
+            const explorerContainer = document.createElement('div');
+            explorerContainer.style.cssText = `
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                max-width: 600px;
+                max-height: 80%;
+                position: relative;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            `;
+            
+            const closeButton = document.createElement('button');
+            closeButton.innerHTML = '✕';
+            closeButton.style.cssText = `
+                position: absolute;
+                top: 10px;
+                right: 15px;
+                background: none;
+                border: none;
+                font-size: 20px;
+                cursor: pointer;
+                color: #666;
+                padding: 5px;
+                z-index: 1;
+            `;
+            
+            const headerContainer = document.createElement('div');
+            headerContainer.style.cssText = `
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+            `;
+            
+            const title = document.createElement('h3');
+            title.textContent = '选择要预览的文件';
+            title.style.cssText = `
+                margin: 0;
+                color: #333;
+                flex: 1;
+                text-align: center;
+            `;
+            
+            const refreshButton = document.createElement('button');
+            refreshButton.innerHTML = '🔄 刷新';
+            refreshButton.style.cssText = `
+                background: #007bff;
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                transition: background 0.2s ease;
+            `;
+            
+            refreshButton.onmouseenter = () => refreshButton.style.backgroundColor = '#0056b3';
+            refreshButton.onmouseleave = () => refreshButton.style.backgroundColor = '#007bff';
+            
+            refreshButton.onclick = () => {
+                console.log('手动刷新文件列表');
+                refreshButton.textContent = '刷新中...';
+                refreshButton.disabled = true;
+                
+                // 清空缓存并重新获取文件列表
+                clearFileListCache();
+                
+                // 关闭当前模态框
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    if (modal.parentNode) {
+                        modal.parentNode.removeChild(modal);
+                    }
+                    // 重新打开文件浏览器
+                    showFileExplorer();
+                }, 300);
+            };
+            
+            headerContainer.appendChild(title);
+            headerContainer.appendChild(refreshButton);
+            
+            const fileList = document.createElement('div');
+            fileList.style.cssText = `
+                max-height: 400px;
+                overflow-y: auto;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 10px;
+            `;
+            
+            // 按文件夹分组显示文件
+            const filesByFolder = {};
+            files.forEach(file => {
+                const folderPath = file.path.split('\\')[0] || file.path.split('/')[0];
+                if (!filesByFolder[folderPath]) {
+                    filesByFolder[folderPath] = [];
+                }
+                filesByFolder[folderPath].push(file);
+            });
+            
+            // 创建文件列表
+            Object.keys(filesByFolder).forEach(folderName => {
+                // 文件夹标题
+                const folderHeader = document.createElement('div');
+                folderHeader.textContent = `📁 ${folderName}`;
+                folderHeader.style.cssText = `
+                    font-weight: bold;
+                    color: #2196f3;
+                    margin: 15px 0 10px 0;
+                    padding: 8px;
+                    background: #f0f8ff;
+                    border-radius: 4px;
+                    border-left: 4px solid #2196f3;
+                `;
+                fileList.appendChild(folderHeader);
+                
+                // 文件夹中的文件
+                filesByFolder[folderName].forEach(file => {
+                    const fileItem = document.createElement('div');
+                    fileItem.style.cssText = `
+                        padding: 12px;
+                        margin: 5px 0;
+                        border: 1px solid #e0e0e0;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        transition: all 0.2s ease;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                    `;
+                    
+                    const fileInfo = document.createElement('div');
+                    fileInfo.style.cssText = `
+                        display: flex;
+                        flex-direction: column;
+                        flex: 1;
+                    `;
+                    
+                    const fileName = document.createElement('div');
+                    fileName.style.cssText = `
+                        font-weight: 500;
+                        color: #333;
+                        margin-bottom: 4px;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    `;
+                    
+                    // 创建PDF图标
+                    const pdfIcon = document.createElement('img');
+                    // 使用base64编码的PDF图标（红色PDF图标）
+                    pdfIcon.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTE0IDJINkM0LjkgMiA0IDIuOSA0IDRWMjBDNCAyMS4xIDQuOSAyMiA2IDIySDE4QzE5LjEgMjIgMjAgMjEuMSAyMCAyMFY4TDE0IDJaIiBmaWxsPSIjRTUzRTNFIi8+CjxwYXRoIGQ9Ik0xNCAyVjhIMjAiIHN0cm9rZT0iI0U1M0UzRSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGZpbGw9Im5vbmUiLz4KPHN0eWxlPi5wZGYtdGV4dCB7IGZvbnQtZmFtaWx5OiBBcmlhbCwgc2Fucy1zZXJpZjsgZm9udC1zaXplOiA2cHg7IGZvbnQtd2VpZ2h0OiBib2xkOyBmaWxsOiB3aGl0ZTsgfTwvc3R5bGU+Cjx0ZXh0IHg9IjEyIiB5PSIxNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgY2xhc3M9InBkZi10ZXh0Ij5QREY8L3RleHQ+Cjwvc3ZnPg==';
+                    pdfIcon.style.cssText = `
+                        width: 20px;
+                        height: 20px;
+                        flex-shrink: 0;
+                    `;
+                    
+                    // 图标加载失败时使用备用emoji图标
+                    pdfIcon.onerror = () => {
+                        // 如果SVG也加载失败，使用emoji
+                        const emojiIcon = document.createElement('span');
+                        emojiIcon.textContent = '📄';
+                        emojiIcon.style.cssText = `
+                            font-size: 16px;
+                            margin-right: 4px;
+                            flex-shrink: 0;
+                        `;
+                        fileName.replaceChild(emojiIcon, pdfIcon);
+                    };
+                    
+                    const fileNameText = document.createElement('span');
+                    fileNameText.textContent = file.name;
+                    
+                    fileName.appendChild(pdfIcon);
+                    fileName.appendChild(fileNameText);
+                    
+                    const fileSize = document.createElement('div');
+                    fileSize.textContent = `大小: ${(file.size / 1024).toFixed(2)} KB`;
+                    fileSize.style.cssText = `
+                        font-size: 12px;
+                        color: #666;
+                    `;
+                    
+                    const previewButton = document.createElement('button');
+                    previewButton.textContent = '预览';
+                    previewButton.style.cssText = `
+                        background: #2196f3;
+                        color: white;
+                        border: none;
+                        padding: 6px 12px;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 12px;
+                        transition: background 0.2s ease;
+                    `;
+                    
+                    fileInfo.appendChild(fileName);
+                    fileInfo.appendChild(fileSize);
+                    fileItem.appendChild(fileInfo);
+                    fileItem.appendChild(previewButton);
+                    
+                    // 悬停效果
+                    fileItem.onmouseenter = () => {
+                        fileItem.style.backgroundColor = '#f5f5f5';
+                        fileItem.style.borderColor = '#2196f3';
+                        previewButton.style.backgroundColor = '#1976d2';
+                    };
+                    
+                    fileItem.onmouseleave = () => {
+                        fileItem.style.backgroundColor = '';
+                        fileItem.style.borderColor = '#e0e0e0';
+                        previewButton.style.backgroundColor = '#2196f3';
+                    };
+                    
+                    // 点击预览
+                    const openPreview = () => {
+                        // 关闭文件浏览器
+                        modal.style.opacity = '0';
+                        setTimeout(() => {
+                            if (modal.parentNode) {
+                                modal.parentNode.removeChild(modal);
+                            }
+                        }, 300);
+                        
+                        // 打开PDF预览
+                        setTimeout(() => {
+                            showPDFPreview(file.path, file.name);
+                        }, 400);
+                    };
+                    
+                    previewButton.onclick = (e) => {
+                        e.stopPropagation();
+                        openPreview();
+                    };
+                    
+                    fileItem.onclick = openPreview;
+                    
+                    fileList.appendChild(fileItem);
+                });
+            });
+            
+            closeButton.onclick = () => {
+                // 清空解压文件，等待完成后再关闭窗口
+                clearExtractedFiles().finally(() => {
+                    modal.style.opacity = '0';
+                    setTimeout(() => {
+                        if (modal.parentNode) {
+                            modal.parentNode.removeChild(modal);
+                        }
+                    }, 300);
+                });
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    closeButton.onclick();
+                }
+            };
+            
+            explorerContainer.appendChild(closeButton);
+            explorerContainer.appendChild(headerContainer);
+            explorerContainer.appendChild(fileList);
+            modal.appendChild(explorerContainer);
+            document.body.appendChild(modal);
+            
+            // 添加键盘事件处理
+            const handleFileExplorerKeyDown = (e) => {
+                if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+                    e.preventDefault();
+                    console.log('按下F5或Ctrl+R，触发文件列表刷新');
+                    refreshButton.onclick();
+                } else if (e.key === 'Escape') {
+                    closeButton.onclick();
+                }
+            };
+            
+            document.addEventListener('keydown', handleFileExplorerKeyDown);
+            
+            // 确保在关闭时清理事件监听器
+            const originalCloseFunction = closeButton.onclick;
+            closeButton.onclick = () => {
+                document.removeEventListener('keydown', handleFileExplorerKeyDown);
+                originalCloseFunction();
+            };
+            
+            // 显示动画
+            setTimeout(() => {
+                modal.style.opacity = '1';
+            }, 10);
+        }
+        
+        function clearExtractedFiles() {
+            return fetch('/clear-extracted-files')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log('✅ 解压文件已清空');
+                        // 清空文件列表缓存
+                        clearFileListCache();
+                        return true;
+                    } else {
+                        console.log('⚠️ 清空解压文件失败:', data.message);
+                        return false;
+                    }
+                })
+                .catch(error => {
+                    console.log('⚠️ 清空解压文件请求失败:', error);
+                    return false;
+                });
+        }
+
+        function showPDFPreview(pdfPath, fileName) {
+            // 关闭任何现有的预览窗口
+            const existingModals = document.querySelectorAll('[data-modal-type="pdf-preview"]');
+            existingModals.forEach(modal => {
+                if (modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            });
+            
+            // 创建PDF预览模态框
+            const modal = document.createElement('div');
+            modal.setAttribute('data-modal-type', 'pdf-preview');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                z-index: 20000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            `;
+            
+            const previewContainer = document.createElement('div');
+            previewContainer.style.cssText = `
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                max-width: 95%;
+                max-height: 95%;
+                position: relative;
+                display: flex;
+                flex-direction: column;
+            `;
+            
+            const headerBar = document.createElement('div');
+            headerBar.style.cssText = `
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 15px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid #eee;
+            `;
+            
+            const title = document.createElement('h3');
+            title.textContent = fileName || 'PDF 文档预览';
+            title.style.cssText = `
+                margin: 0;
+                color: #333;
+                flex: 1;
+                font-size: 16px;
+            `;
+            
+            const buttonGroup = document.createElement('div');
+            buttonGroup.style.cssText = `
+                display: flex;
+                gap: 10px;
+                align-items: center;
+            `;
+            
+            const backButton = document.createElement('button');
+            backButton.innerHTML = '← 返回文件列表';
+            backButton.style.cssText = `
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                transition: background 0.2s ease;
+            `;
+            
+            const closeButton = document.createElement('button');
+            closeButton.innerHTML = '✕ 关闭';
+            closeButton.style.cssText = `
+                background: #dc3545;
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                transition: background 0.2s ease;
+            `;
+            
+            const iframe = document.createElement('iframe');
+            // 添加时间戳参数避免缓存问题
+            const timestamp = new Date().getTime();
+            const pdfUrl = `http://localhost:8000/preview-pdf?path=${encodeURIComponent(pdfPath)}&t=${timestamp}`;
+            console.log('正在加载PDF:', pdfUrl);
+            iframe.src = pdfUrl;
+            iframe.style.cssText = `
+                width: 900px;
+                height: 700px;
+                border: none;
+                border-radius: 4px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            `;
+            
+            // 添加iframe加载事件监听
+            iframe.onload = () => {
+                console.log('PDF加载完成:', fileName);
+            };
+            
+            iframe.onerror = () => {
+                console.error('PDF加载失败:', fileName);
+                showNotification('PDF加载失败', 'error');
+            };
+            
+            // 按钮事件
+            backButton.onmouseenter = () => backButton.style.backgroundColor = '#5a6268';
+            backButton.onmouseleave = () => backButton.style.backgroundColor = '#6c757d';
+            closeButton.onmouseenter = () => closeButton.style.backgroundColor = '#c82333';
+            closeButton.onmouseleave = () => closeButton.style.backgroundColor = '#dc3545';
+            
+            backButton.onclick = () => {
+                console.log('返回文件列表按钮被点击');
+                // 先移除键盘事件监听器
+                document.removeEventListener('keydown', handleKeyDown);
+                
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    if (modal.parentNode) {
+                        modal.parentNode.removeChild(modal);
+                    }
+                    // 直接打开文件浏览器，使用缓存提高速度
+                    // 不清空缓存，除非真的需要刷新文件列表
+                    setTimeout(() => {
+                        console.log('快速重新打开文件浏览器（使用缓存）');
+                        showFileExplorer();
+                    }, 100);
+                }, 300);
+            };
+            
+            closeButton.onclick = () => {
+                console.log('关闭PDF预览');
+                // 先移除键盘事件监听器
+                document.removeEventListener('keydown', handleKeyDown);
+                
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    if (modal.parentNode) {
+                        modal.parentNode.removeChild(modal);
+                    }
+                }, 300);
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    closeButton.onclick();
+                }
+            };
+            
+            // 键盘快捷键
+            const handleKeyDown = (e) => {
+                if (e.key === 'Escape') {
+                    closeButton.onclick();
+                } else if (e.key === 'Backspace' || (e.ctrlKey && e.key === 'ArrowLeft')) {
+                    backButton.onclick();
+                }
+            };
+            
+            document.addEventListener('keydown', handleKeyDown);
+            
+            buttonGroup.appendChild(backButton);
+            buttonGroup.appendChild(closeButton);
+            headerBar.appendChild(title);
+            headerBar.appendChild(buttonGroup);
+            previewContainer.appendChild(headerBar);
+            previewContainer.appendChild(iframe);
+            modal.appendChild(previewContainer);
+            document.body.appendChild(modal);
+            
+            // 显示动画
+            setTimeout(() => {
+                modal.style.opacity = '1';
+            }, 10);
+        }
+        
+        function executeBatScript() {
+            // 显示加载状态
+            var certItem = document.querySelector('.cert-item-1');
+            var originalText = certItem.textContent;
+            certItem.textContent = '启动中...';
+            certItem.style.backgroundColor = '#fff3cd';
+            certItem.style.borderColor = '#ffc107';
+            certItem.style.color = '#856404';
+            
+            // 通过新的后端API执行TagUI脚本
+            fetch('http://localhost:8000/execute-tagui', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ action: 'execute' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('执行结果:', data);
+                
+                if (data.status === 'started') {
+                    // 脚本已启动，开始轮询状态
+                    certItem.textContent = '执行中...';
+                    certItem.style.backgroundColor = '#d1ecf1';
+                    certItem.style.borderColor = '#17a2b8';
+                    certItem.style.color = '#0c5460';
+                    
+                    showNotification('TagUI脚本已启动！\n' + data.note, 'success');
+                    
+                    // 开始轮询执行状态
+                    pollExecutionStatus(certItem, originalText);
+                    
+                } else if (data.status === 'running') {
+                    showNotification('脚本正在执行中，请稍等...\n当前方式: ' + data.current_method, 'info');
+                    // 恢复按钮状态
+                    certItem.textContent = originalText;
+                    certItem.style.backgroundColor = '#e3f2fd';
+                    certItem.style.borderColor = '#2196f3';
+                    certItem.style.color = '#1976d2';
+                } else {
+                    showNotification('启动失败：' + data.message, 'error');
+                    // 恢复按钮状态
+                    certItem.textContent = originalText;
+                    certItem.style.backgroundColor = '#e3f2fd';
+                    certItem.style.borderColor = '#2196f3';
+                    certItem.style.color = '#1976d2';
+                }
+            })
+            .catch(error => {
+                console.error('请求失败:', error);
+                
+                // 恢复按钮状态
+                certItem.textContent = originalText;
+                certItem.style.backgroundColor = '#f8d7da';
+                certItem.style.borderColor = '#dc3545';
+                certItem.style.color = '#721c24';
+                
+                showNotification('无法连接到后端服务器。请确保：\n1. 运行了 auto_run.py\n2. 服务器在 http://localhost:8000 上运行', 'error', 3000);
+            });
+        }
+        
+        function pollExecutionStatus(certItem, originalText) {
+            const pollInterval = setInterval(() => {
+                fetch('http://localhost:8000/status')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('状态查询结果:', data);
+                    
+                    if (data.status === 'completed') {
+                        clearInterval(pollInterval);
+                        
+                        // 显示完成状态
+                        certItem.textContent = '✓ 完成';
+                        certItem.style.backgroundColor = '#d4edda';
+                        certItem.style.borderColor = '#28a745';
+                        certItem.style.color = '#155724';
+                        
+                        showNotification('TagUI脚本执行成功！\n' + data.message, 'success');
+                        
+                        // 清空文件列表缓存，确保下次获取最新数据
+                        clearFileListCache();
+                        
+                        // 如果有PDF文件，显示文件浏览器
+                        if (data.pdf_files && data.pdf_files.length > 0) {
+                            setTimeout(() => {
+                                showFileExplorer();
+                            }, 1000);
+                        }
+                        
+                        // 3秒后恢复原始状态
+                        setTimeout(() => {
+                            certItem.textContent = originalText;
+                            certItem.style.backgroundColor = '#e3f2fd';
+                            certItem.style.borderColor = '#2196f3';
+                            certItem.style.color = '#1976d2';
+                        }, 3000);
+                        
+                    } else if (data.status === 'failed') {
+                        clearInterval(pollInterval);
+                        
+                        // 显示失败状态
+                        certItem.textContent = '✗ 失败';
+                        certItem.style.backgroundColor = '#f8d7da';
+                        certItem.style.borderColor = '#dc3545';
+                        certItem.style.color = '#721c24';
+                        
+                        showNotification('TagUI脚本执行失败：\n' + data.message, 'error');
+                        
+                        // 3秒后恢复原始状态
+                        setTimeout(() => {
+                            certItem.textContent = originalText;
+                            certItem.style.backgroundColor = '#e3f2fd';
+                            certItem.style.borderColor = '#2196f3';
+                            certItem.style.color = '#1976d2';
+                        }, 3000);
+                    } else if (data.status === 'running') {
+                        // 更新执行状态
+                        certItem.textContent = data.method || '执行中...';
+                    }
+                })
+                .catch(error => {
+                    console.error('状态查询失败:', error);
+                    clearInterval(pollInterval);
+                    // 恢复按钮状态
+                    certItem.textContent = originalText;
+                    certItem.style.backgroundColor = '#e3f2fd';
+                    certItem.style.borderColor = '#2196f3';
+                    certItem.style.color = '#1976d2';
+                });
+            }, 2000); // 每2秒查询一次状态
+        }
+        
+        // 检查服务器连接
+        function checkServerConnection() {
+            fetch('http://localhost:8000/')
+            .then(response => {
+                console.log('TagUI后端服务器连接正常');
+            })
+            .catch(error => {
+                console.warn('TagUI后端服务器未运行，请先启动 auto_run.py');
+                
+                // 使用新的通知系统替代原来的警告框
+                showNotification('⚠️ 请先运行 auto_run.py 启动TagUI后端服务器', 'warning', 5000);
+            });
+        }
+        
+        // 页面加载完成后检查服务器连接
+        window.onload = function() {
+            checkServerConnection();
+        };
+        
+        // 显示打印日志页面
+        function showPrintLog() {
+            // 获取打印日志数据
+            fetch('http://localhost:8000/print-log')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    displayPrintLogModal(data.logs);
+                } else {
+                    showNotification('获取打印日志失败: ' + data.message, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('获取打印日志失败:', error);
+                showNotification('获取打印日志失败', 'error');
+            });
+        }
+        
+        // 显示打印日志模态框
+        function displayPrintLogModal(logs) {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.8);
+                z-index: 30000;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            `;
+            
+            const logContainer = document.createElement('div');
+            logContainer.style.cssText = `
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                max-width: 90%;
+                max-height: 90%;
+                position: relative;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                min-width: 800px;
+            `;
+            
+            const header = document.createElement('div');
+            header.style.cssText = `
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+                padding-bottom: 15px;
+                border-bottom: 2px solid #eee;
+            `;
+            
+            const title = document.createElement('h2');
+            title.textContent = '打印日志';
+            title.style.cssText = `
+                margin: 0;
+                color: #333;
+                font-size: 20px;
+            `;
+            
+            const closeButton = document.createElement('button');
+            closeButton.innerHTML = '✕';
+            closeButton.style.cssText = `
+                background: none;
+                border: none;
+                font-size: 24px;
+                cursor: pointer;
+                color: #666;
+                padding: 5px;
+            `;
+            
+            const logTable = document.createElement('div');
+            logTable.style.cssText = `
+                overflow-y: auto;
+                max-height: 500px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            `;
+            
+            // 创建表格
+            const table = document.createElement('table');
+            table.style.cssText = `
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 14px;
+            `;
+            
+            // 表头
+            const thead = document.createElement('thead');
+            thead.innerHTML = `
+                <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                    <th style="padding: 12px 8px; text-align: left; border-right: 1px solid #dee2e6;">ID</th>
+                    <th style="padding: 12px 8px; text-align: left; border-right: 1px solid #dee2e6;">证件号</th>
+                    <th style="padding: 12px 8px; text-align: left; border-right: 1px solid #dee2e6;">打印时间</th>
+                    <th style="padding: 12px 8px; text-align: left; border-right: 1px solid #dee2e6;">经办人</th>
+                    <th style="padding: 12px 8px; text-align: left; border-right: 1px solid #dee2e6;">系统版本</th>
+                    <th style="padding: 12px 8px; text-align: left; border-right: 1px solid #dee2e6;">状态</th>
+                    <th style="padding: 12px 8px; text-align: left;">错误信息</th>
+                </tr>
+            `;
+            
+            const tbody = document.createElement('tbody');
+            
+            // 填充数据
+            logs.forEach((log, index) => {
+                const row = document.createElement('tr');
+                row.style.cssText = `
+                    border-bottom: 1px solid #dee2e6;
+                    ${index % 2 === 0 ? 'background: #f8f9fa;' : 'background: white;'}
+                `;
+                
+                const statusColor = log.status === 'SUCCESS' ? '#28a745' : '#dc3545';
+                const statusText = log.status === 'SUCCESS' ? '成功' : '失败';
+                
+                row.innerHTML = `
+                    <td style="padding: 10px 8px; border-right: 1px solid #dee2e6;">${log.id}</td>
+                    <td style="padding: 10px 8px; border-right: 1px solid #dee2e6;">${log.cert_no}</td>
+                    <td style="padding: 10px 8px; border-right: 1px solid #dee2e6;">${formatDateTime(log.print_time)}</td>
+                    <td style="padding: 10px 8px; border-right: 1px solid #dee2e6;">${log.operator}</td>
+                    <td style="padding: 10px 8px; border-right: 1px solid #dee2e6;">${log.sys_version}</td>
+                    <td style="padding: 10px 8px; border-right: 1px solid #dee2e6; color: ${statusColor}; font-weight: bold;">${statusText}</td>
+                    <td style="padding: 10px 8px; color: #666; font-size: 12px;">${log.err_msg || '-'}</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            logTable.appendChild(table);
+            
+            // 事件处理
+            closeButton.onclick = () => {
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    if (modal.parentNode) {
+                        modal.parentNode.removeChild(modal);
+                    }
+                }, 300);
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    closeButton.onclick();
+                }
+            };
+            
+            header.appendChild(title);
+            header.appendChild(closeButton);
+            logContainer.appendChild(header);
+            logContainer.appendChild(logTable);
+            modal.appendChild(logContainer);
+            document.body.appendChild(modal);
+            
+            // 显示动画
+            setTimeout(() => {
+                modal.style.opacity = '1';
+            }, 10);
+        }
+        
+        // 格式化日期时间
+        function formatDateTime(dateTimeStr) {
+            const date = new Date(dateTimeStr);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+    </script>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <img src="src\火炬logo.png" alt="Logo" style="height: 50px;">
+            <span style="color: rgb(0, 0, 178);" >广西南宁高新技术产业开发区管理委员会网站</span>
+        </div>
+        <div class="header-actions">
+            <button class="print-log-btn" onclick="showPrintLog()">
+                打印日志
+            </button>
+
+            </div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <!-- 分类标题 -->
+        <div class="category-title">xxxxxxxxxxxxxxx标题</div>
+        <!-- 第一行证件 -->
+        <div class="cert-grid">
+            <div class="cert-item-1 cert-item" onclick="executeBatScript()">食品经营许可证</div>
+            <div class="cert-item-2 cert-item">证件2</div>
+            <div class="cert-item-3 cert-item">证件3</div>
+            <div class="cert-item-4 cert-item">证件4</div>
+            <div class="cert-item-5 cert-item">证件5</div>
+        </div>
+        
+        <div class="cert-grid">
+            <div class="cert-item-6 cert-item">证件6</div>
+            <div class="cert-item-7 cert-item">证件7</div>
+            <div class="cert-item-8 cert-item">证件8</div>
+            <div class="cert-item-9 cert-item">证件9</div>
+            <div class="cert-item-10 cert-item">证件10</div>
+        </div>
+        
+        <!-- 分类标题 -->
+        <div class="category-title">xxxxxxxxxxxxxxx标题</div>
+        
+        <!-- 第二组证件 -->
+        <div class="cert-grid">
+            <div class="cert-item-11 cert-item">证件11</div>
+            <div class="cert-item-12 cert-item">证件12</div>
+            <div class="cert-item-13 cert-item">证件13</div>
+            <div class="cert-item-14 cert-item">证件14</div>
+            <div class="cert-item-15 cert-item">证件15</div>
+        </div>
+        
+        <div class="cert-grid">
+            <div class="cert-item-16 cert-item">证件16</div>
+            <div class="cert-item-17 cert-item">证件17</div>
+            <div class="cert-item-18 cert-item">证件18</div>
+            <div class="cert-item-19 cert-item">证件19</div>
+            <div class="cert-item-20 cert-item">证件20</div>
+        </div>
+        
+        <!-- 分类标题 -->
+        <div class="category-title">xxxxxxxxxxxxxxx标题</div>
+        
+        <!-- 第三组证件 -->
+        <div class="cert-grid">
+            <div class="cert-item-21 cert-item">证件21</div>
+            <div class="cert-item-22 cert-item">证件22</div>
+            <div class="cert-item-23 cert-item">证件23</div>
+            <div class="cert-item-24 cert-item">证件24</div>
+            <div class="cert-item-25 cert-item">证件25</div>
+        </div>
+        
+        <div class="cert-grid">
+            <div class="cert-item-26 cert-item">证件26</div>
+            <div class="cert-item-27 cert-item">证件27</div>
+            <div class="cert-item-28 cert-item">证件28</div>
+            <div class="cert-item-29 cert-item">证件29</div>
+            <div class="cert-item-30 cert-item">证件30</div>
+        </div>
+        
+        <!-- 分类标题 -->
+        <div class="category-title">xxxxxxxxxxxxxxx标题</div>
+        
+        <!-- 第四组证件 -->
+        <div class="cert-grid">
+            <div class="cert-item-31 cert-item">证件31</div>
+            <div class="cert-item-32 cert-item">证件32</div>
+            <div class="cert-item-33 cert-item">证件33</div>
+            <div class="cert-item-34 cert-item">证件34</div>
+            <div class="cert-item-35 cert-item">证件35</div>
+        </div>
+        
+        <div class="cert-grid">
+            <div class="cert-item-36 cert-item">证件36</div>
+            <div class="cert-item-37 cert-item">证件37</div>
+            <div class="cert-item-38 cert-item">证件38</div>
+            <div class="cert-item-39 cert-item">证件39</div>
+            <div class="cert-item-40 cert-item">证件40</div>
+        </div>
+    </div>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #f5f5f5;
+            font-family: Arial, sans-serif;
+        }
+
+        .header {
+            background-color: white;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: #333;
+            font-weight: bold;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .print-log-btn {
+            background-color: #e3f2fd !important;
+            border: 2px solid #2196f3;
+            color: #1976d2 !important;
+            font-weight: bold;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .print-log-btn:hover {
+            background: #bbdefb !important;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .cert-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .cert-item {
+            background-color: white;
+            height: 80px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            color: #666;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .cert-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .cert-item-1 {
+            background-color: #e3f2fd !important;
+            border: 2px solid #2196f3;
+            color: #1976d2 !important;
+            font-weight: bold;
+        }
+
+        .cert-item-1:hover {
+            background-color: #bbdefb !important;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 16px rgba(33, 150, 243, 0.3);
+        }
+
+        .category-title {
+            background-color: #e8e8e8;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            padding-left: 20px;
+            margin: 30px 0 15px 0;
+            border-radius: 8px;
+            color: #333;
+            font-weight: bold;
+            border-left: 4px solid #007bff;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 1024px) {
+            .cert-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .cert-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            .header {
+                padding: 10px 15px;
+            }
+            .logo span {
+                font-size: 14px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .cert-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</body>
+</html>
