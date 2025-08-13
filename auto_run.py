@@ -1,12 +1,12 @@
 import subprocess
 import os
 import json
-import http.server
-import socketserver
 import threading
 import shutil
 import time
 from pathlib import Path
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 
 class DatabaseManager:
     """数据库管理类"""
@@ -169,7 +169,7 @@ class TagUIRunner:
         
         return pdf_files
     
-    def list_all_cmd_processes(self):
+    def list_all_cmd_processes(self):    # 列出当前所有的cmd.exe进程
         """列出所有cmd.exe进程的信息（包括进程号）"""
         print("📋 当前所有cmd.exe进程:")
         
@@ -237,7 +237,7 @@ class TagUIRunner:
             except Exception as e2:
                 print(f"   所有方法都失败: {e2}")
 
-    def get_current_cmd_pids(self):
+    def get_current_cmd_pids(self):      # 输出为所有正在运行的cmd进程的进程号
         """获取当前所有cmd进程的PID列表"""
         cmd_pids = set()
         try:
@@ -254,7 +254,7 @@ class TagUIRunner:
             print(f"   获取cmd进程PID失败: {e}")
         return cmd_pids
     
-    def find_new_tagui_cmd_process(self, initial_cmd_pids):
+    def find_new_tagui_cmd_process(self, initial_cmd_pids):  # 通过两次获取cmd进程号查找新的cmd进程，并为新的cmd进程赋予优先级从而确定真正的tagui进程
         """查找新启动的TagUI cmd进程"""
         try:
             # 获取当前cmd进程
@@ -336,7 +336,7 @@ class TagUIRunner:
             print(f"   查找新TagUI进程失败: {e}")
             return None
     
-    def monitor_specific_cmd_process(self, cmd_pid, check_interval=3):
+    def monitor_specific_cmd_process(self, cmd_pid, check_interval=3):  # 监控某一个特定pid的cmd进程是否是运行中的状态
         """监控特定的cmd进程，等待它结束"""
         print(f"👀 开始监控特定cmd进程: PID={cmd_pid}")
         print(f"   检查间隔: {check_interval}秒")
@@ -381,103 +381,6 @@ class TagUIRunner:
                 print(f"   ⚠️  进程监控异常: {e}")
                 time.sleep(check_interval)
 
-    def monitor_tagui_processes(self, check_interval=3):
-        """监控TagUI启动的cmd进程，等待它结束"""
-        print("👀 开始监控TagUI启动的cmd进程...")
-        print(f"   检查间隔: {check_interval}秒")
-        
-        start_time = time.time()
-        tagui_cmd_found = False
-        tagui_cmd_pid = None
-        initial_wait_time = 5  # 给TagUI 5秒时间启动
-        
-        # 记录执行前的cmd进程
-        initial_cmd_pids = set()
-        try:
-            result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq cmd.exe', '/FO', 'CSV'], 
-                                  capture_output=True, text=True, encoding='gbk', errors='ignore')
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                for line in lines[1:]:  # 跳过标题行
-                    if 'cmd.exe' in line:
-                        fields = [field.strip('"') for field in line.split('","')]
-                        if len(fields) >= 2 and fields[1].isdigit():
-                            initial_cmd_pids.add(fields[1])
-            print(f"   📋 记录执行前的cmd进程: {len(initial_cmd_pids)} 个")
-        except Exception as e:
-            print(f"   ⚠️  无法获取初始cmd进程: {e}")
-        
-        print(f"   ⏳ 等待TagUI cmd进程启动... ({initial_wait_time}秒)")
-        time.sleep(initial_wait_time)
-        
-        while True:
-            try:
-                elapsed_time = time.time() - start_time
-                
-                # 获取当前所有cmd进程
-                current_cmd_pids = set()
-                try:
-                    result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq cmd.exe', '/FO', 'CSV'], 
-                                          capture_output=True, text=True, encoding='gbk', errors='ignore')
-                    if result.returncode == 0:
-                        lines = result.stdout.strip().split('\n')
-                        for line in lines[1:]:  # 跳过标题行
-                            if 'cmd.exe' in line:
-                                fields = [field.strip('"') for field in line.split('","')]
-                                if len(fields) >= 2 and fields[1].isdigit():
-                                    current_cmd_pids.add(fields[1])
-                except Exception as e:
-                    print(f"   ⚠️  获取cmd进程失败: {e}")
-                    time.sleep(check_interval)
-                    continue
-                
-                # 查找新的cmd进程（TagUI启动的）
-                new_cmd_pids = current_cmd_pids - initial_cmd_pids
-                
-                if not tagui_cmd_found:
-                    if new_cmd_pids:
-                        # 发现新的cmd进程，应该是TagUI启动的
-                        tagui_cmd_pid = list(new_cmd_pids)[0]  # 取第一个新进程
-                        print(f"   ✅ 发现TagUI cmd进程: PID={tagui_cmd_pid}")
-                        
-                        # 尝试获取该进程的命令行信息确认
-                        try:
-                            wmic_result = subprocess.run([
-                                'wmic', 'process', 'where', f'ProcessId={tagui_cmd_pid}',
-                                'get', 'CommandLine', '/format:list'
-                            ], capture_output=True, text=True, encoding='gbk', errors='ignore')
-                            
-                            if 'tagui' in wmic_result.stdout.lower():
-                                print(f"   🎯 确认这是TagUI相关的cmd进程")
-                            else:
-                                print(f"   📝 cmd进程命令行: {wmic_result.stdout.strip()[:100]}...")
-                        except:
-                            print(f"   📝 无法获取cmd进程详细信息")
-                        
-                        tagui_cmd_found = True
-                    else:
-                        print(f"   ⏳ 等待TagUI cmd进程启动... 已等待: {elapsed_time:.1f}秒")
-                        if elapsed_time > 60:  # 60秒还没启动就报错
-                            print("   ❌ TagUI cmd进程启动超时 (60秒)")
-                            return False
-                else:
-                    # 已经找到TagUI cmd进程，检查它是否还在运行
-                    if tagui_cmd_pid in current_cmd_pids:
-                        print(f"   ⏳ TagUI cmd进程运行中... PID={tagui_cmd_pid}, 已运行: {elapsed_time:.1f}秒")
-                    else:
-                        # TagUI cmd进程已经结束
-                        print(f"   ✅ TagUI cmd进程已结束! PID={tagui_cmd_pid}")
-                        print(f"   📊 执行统计:")
-                        print(f"      总执行时间: {elapsed_time:.2f}秒")
-                        print(f"   🎯 TagUI脚本执行完毕，开始后续操作...")
-                        return True
-                
-                time.sleep(check_interval)
-                
-            except Exception as e:
-                print(f"   ⚠️  进程检查异常: {e}")
-                time.sleep(check_interval)
-    
     def run_with_powershell_elevation(self):
         """使用PowerShell尝试提升权限"""
         # PowerShell命令，尝试以管理员身份运行
@@ -527,7 +430,8 @@ class TagUIRunner:
                 print("⚠️ 未找到特定TagUI cmd进程，使用通用监控")
                 # 如果找不到特定进程，使用原来的方法
                 self.monitor_tagui_processes()
-            
+                # TODO：找不到特定进程时应该结束
+
             # TagUI进程已退出，脚本执行完成
             print("✅ TagUI cmd.exe进程已全部退出 - 脚本执行完毕")
             
@@ -549,7 +453,7 @@ class TagUIRunner:
             print(f"❌ PowerShell执行失败: {e}")
             return False
     
-    def check_and_extract_downloaded_files(self):
+    def check_and_extract_downloaded_files(self):   # 检查路径下是否有压缩包并进行解压
         """直接检查下载目录中的压缩包文件并解压"""
         print("="*60)
         print("🔍 开始检查下载目录中的压缩包文件")
@@ -782,43 +686,6 @@ class TagUIRunner:
             print(f"      ❌ ZIP解压失败: {e}")
             return False
 
-    def run_normal(self):
-        """普通权限执行"""
-        try:
-            # 设置环境变量
-            env = os.environ.copy()
-            env['JAVA_TOOL_OPTIONS'] = '-Dfile.encoding=UTF-8 -Duser.language=zh -Duser.country=CN'
-            
-            # 启动TagUI进程（非阻塞）
-            print("🚀 启动TagUI进程（普通权限）...")
-            process = subprocess.Popen([
-                "C:\\tagui\\src\\tagui", 
-                "tag\\test3.tag",
-                "-edge"
-            ], cwd=str(self.script_dir), env=env)
-            
-            print(f"📋 TagUI进程已启动，PID: {process.pid}")
-            
-            # 监控TagUI进程
-            self.monitor_tagui_processes()
-            
-            # TagUI进程已退出，脚本执行完成
-            print("✅ TagUI进程已全部退出 - 脚本执行完毕")
-            
-            # 现在开始检查下载的文件
-            print("🔍 开始检查下载文件...")
-            file_processed = self.check_and_extract_downloaded_files()
-            if file_processed:
-                print("📁 文件处理完成")
-            else:
-                print("⚠️  文件处理未成功")
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ 普通权限执行失败: {e}")
-            return False
-    
     def execute_async(self):
         """异步执行TagUI脚本"""
         self.execution_status["running"] = True
@@ -828,7 +695,6 @@ class TagUIRunner:
         
         methods = [
             ("PowerShell方式", self.run_with_powershell_elevation),
-            ("普通权限方式", self.run_normal),
         ]
         
         for method_name, method_func in methods:
@@ -850,7 +716,7 @@ class TagUIRunner:
                     
                     # 记录成功的打印日志
                     from datetime import datetime
-                    cert_no = f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    cert_no = f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}"  # 证件号：AUTO_+当前时间
                     db_manager.add_print_log(cert_no, "系统自动", "SUCCESS")
                     
                     return True
@@ -865,7 +731,7 @@ class TagUIRunner:
         
         # 记录失败的打印日志
         from datetime import datetime
-        cert_no = f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}_FAILED"
+        cert_no = f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         db_manager.add_print_log(cert_no, "系统自动", "FAIL", "EXEC_ERROR", "所有执行方式都失败了")
         
         return False
@@ -875,393 +741,102 @@ class TagUIRunner:
 # 全局TagUI执行器实例
 tagui_runner = TagUIRunner()
 
-class CustomHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        # 设置静态文件服务目录为frontend
-        super().__init__(*args, directory="frontend", **kwargs)
+app = Flask(__name__, static_folder='frontend', static_url_path='')
+
+# 启用跨域资源共享
+CORS(app)
+
+# 清空解压文件目录
+@app.route('/clear-extracted-files', methods=['GET'])
+def clear_extracted_files():
+    print("🔍 收到清空解压文件请求")
+    print(f"   请求方法: {request.method}")
+    print(f"   请求路径: {request.path}")
+    print(f"   来源IP: {request.remote_addr}")
     
-    def clear_extracted_files(self):
-        """清空解压文件目录"""
+    extracted_dir = Path("D:/辅助打证/test/extracted_files")
+    print(f"   目标目录: {extracted_dir}")
+    
+    if extracted_dir.exists():
         try:
-            import shutil
-            extracted_dir = Path("D:/辅助打证/test/extracted_files")
+            deleted_files = 0
+            deleted_dirs = 0
             
-            if extracted_dir.exists():
-                # 删除目录中的所有内容
-                for item in extracted_dir.iterdir():
-                    if item.is_file():
-                        item.unlink()
-                        print(f"   删除文件: {item.name}")
-                    elif item.is_dir():
-                        shutil.rmtree(item)
-                        print(f"   删除文件夹: {item.name}")
-                
-                print(f"✅ 解压文件目录已清空: {extracted_dir}")
-                
-                # 清空执行状态中的PDF文件列表
-                tagui_runner.execution_status["pdf_files"] = []
-                tagui_runner.execution_status["status"] = "idle"
-                tagui_runner.execution_status["message"] = ""
-                
-                return True
-            else:
-                print(f"⚠️  解压文件目录不存在: {extracted_dir}")
-                return True  # 目录不存在也算成功
-                
-        except Exception as e:
-            print(f"❌ 清空解压文件目录失败: {e}")
-            return False
-    
-    def get_print_logs(self):
-        """获取打印日志数据"""
-        return db_manager.get_print_logs()
-    
-    def add_print_log(self, cert_no, operator, status='SUCCESS', err_type=None, err_msg=None):
-        """添加打印日志记录"""
-        return db_manager.add_print_log(cert_no, operator, status, err_type, err_msg)
-    
-    def do_GET(self):
-        # 处理状态查询
-        if self.path == '/status':
-            try:
-                status_data = tagui_runner.execution_status.copy()
-                
-                # 确保状态数据完整
-                if "status" not in status_data:
-                    if status_data.get("running", False):
-                        status_data["status"] = "running"
-                    else:
-                        status_data["status"] = "idle"
-                
-                response = {
-                    'status': status_data.get("status", "idle"),
-                    'message': status_data.get("message", ""),
-                    'method': status_data.get("method", ""),
-                    'pdf_files': status_data.get("pdf_files", [])
-                }
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                
-                try:
-                    self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
-                except ConnectionAbortedError:
-                    print("状态查询响应时连接中断")
-                return
-            except ConnectionAbortedError as e:
-                print(f"状态查询连接中断: {e}")
-                return
-            except Exception as e:
-                print(f"状态查询错误: {e}")
-                try:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    
-                    error_response = {
-                        'status': 'error',
-                        'message': f'状态查询失败: {str(e)}',
-                        'method': '',
-                        'pdf_files': []
-                    }
-                    
-                    self.wfile.write(json.dumps(error_response, ensure_ascii=False).encode('utf-8'))
-                except:
-                    # 如果发送错误响应也失败，说明连接已断开，静默处理
-                    pass
-                return
-        
-        # 处理PDF预览
-        elif self.path.startswith('/preview-pdf'):
-            try:
-                # 解析PDF文件路径参数
-                from urllib.parse import urlparse, parse_qs, unquote
-                parsed_url = urlparse(self.path)
-                query_params = parse_qs(parsed_url.query)
-                
-                if 'path' in query_params:
-                    # 对URL编码的路径进行解码
-                    pdf_relative_path = unquote(query_params['path'][0])
-                    pdf_full_path = Path("D:/辅助打证/test/extracted_files") / pdf_relative_path
-                    
-                    if pdf_full_path.exists() and pdf_full_path.suffix.lower() == '.pdf':
-                        # 直接返回PDF文件
-                        with open(pdf_full_path, 'rb') as pdf_file:
-                            pdf_content = pdf_file.read()
-                        
-                        # 对中文文件名进行正确的编码处理
-                        filename = pdf_full_path.name
-                        try:
-                            # 尝试ASCII编码（适用于英文文件名）
-                            filename.encode('ascii')
-                            disposition = f'inline; filename="{filename}"'
-                        except UnicodeEncodeError:
-                            # 中文文件名使用RFC6266标准
-                            from urllib.parse import quote
-                            encoded_filename = quote(filename)
-                            disposition = f'inline; filename*=UTF-8\'\'{encoded_filename}'
-                        
-                        self.send_response(200)
-                        self.send_header('Content-type', 'application/pdf')
-                        self.send_header('Content-Disposition', disposition)
-                        self.send_header('Access-Control-Allow-Origin', '*')
-                        self.end_headers()
-                        
-                        try:
-                            self.wfile.write(pdf_content)
-                        except ConnectionAbortedError:
-                            print("PDF传输时连接中断")
-                            return
-                        return
-                    else:
-                        self.send_response(404)
-                        self.send_header('Content-type', 'text/plain')
-                        self.send_header('Access-Control-Allow-Origin', '*')
-                        self.end_headers()
-                        self.wfile.write(b'PDF file not found')
-                        return
-                else:
-                    self.send_response(400)
-                    self.send_header('Content-type', 'text/plain')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    self.wfile.write(b'Missing path parameter')
-                    return
-            except ConnectionAbortedError as e:
-                print(f"PDF预览连接中断: {e}")
-                # 连接已断开，不尝试发送响应
-                return
-            except Exception as e:
-                print(f"PDF预览错误: {e}")
-                try:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'text/plain')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    self.wfile.write(f'Preview error: {str(e)}'.encode('utf-8'))
-                except:
-                    # 如果发送错误响应也失败，说明连接已断开，静默处理
-                    pass
-                return
-        
-        # 处理清空解压文件目录
-        elif self.path == '/clear-extracted-files':
-            try:
-                success = self.clear_extracted_files()
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                
-                response = {
-                    'success': success,
-                    'message': '解压文件目录已清空' if success else '清空解压文件目录失败'
-                }
-                
-                try:
-                    self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
-                except ConnectionAbortedError:
-                    print("清空文件响应时连接中断")
-                return
-            except ConnectionAbortedError as e:
-                print(f"清空文件连接中断: {e}")
-                return
-            except Exception as e:
-                print(f"清空解压文件目录错误: {e}")
-                try:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    
-                    error_response = {
-                        'success': False,
-                        'message': f'清空失败: {str(e)}'
-                    }
-                    
-                    self.wfile.write(json.dumps(error_response, ensure_ascii=False).encode('utf-8'))
-                except:
-                    # 如果发送错误响应也失败，说明连接已断开，静默处理
-                    pass
-                return
-                error_response = {'success': False, 'message': str(e)}
-                self.wfile.write(json.dumps(error_response, ensure_ascii=False).encode('utf-8'))
-                return
-        
-        # 处理打印日志查询
-        elif self.path == '/print-log':
-            try:
-                logs = self.get_print_logs()
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                
-                response = {
-                    'success': True,
-                    'logs': logs
-                }
-                
-                try:
-                    self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
-                except ConnectionAbortedError:
-                    print("打印日志响应时连接中断")
-                return
-            except ConnectionAbortedError as e:
-                print(f"打印日志连接中断: {e}")
-                return
-            except Exception as e:
-                print(f"获取打印日志错误: {e}")
-                try:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    
-                    error_response = {
-                        'success': False,
-                        'message': f'获取打印日志失败: {str(e)}'
-                    }
-                    
-                    self.wfile.write(json.dumps(error_response, ensure_ascii=False).encode('utf-8'))
-                except:
-                    # 如果发送错误响应也失败，说明连接已断开，静默处理
-                    pass
-                return
-        
-        # 如果请求根路径，重定向到index.html
-        elif self.path == '/':
-            self.path = '/index.html'
-        
-        # 处理其他静态文件请求
-        try:
-            return super().do_GET()
-        except ConnectionAbortedError:
-            print(f"静态文件传输时连接中断: {self.path}")
-            return
-        except Exception as e:
-            print(f"静态文件服务错误: {e} (路径: {self.path})")
-            try:
-                self.send_response(500)
-                self.send_header('Content-type', 'text/plain')
-                self.end_headers()
-                self.wfile.write(b'Internal Server Error')
-            except:
-                # 如果发送错误响应也失败，静默处理
-                pass
-            return
-    
-    def do_POST(self):
-        if self.path == '/execute-tagui':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
+            for file in extracted_dir.iterdir():
+                if file.is_file():
+                    file.unlink()
+                    deleted_files += 1
+                    print(f"   ✅ 删除文件: {file.name}")
+                elif file.is_dir():
+                    shutil.rmtree(file)
+                    deleted_dirs += 1
+                    print(f"   ✅ 删除目录: {file.name}")
             
-            print(f"收到执行TagUI的请求")
+            print(f"   📊 清理完成: {deleted_files}个文件, {deleted_dirs}个目录")
             
-            try:
-                # 解析请求数据
-                try:
-                    request_data = json.loads(post_data.decode('utf-8'))
-                    action = request_data.get('action', 'execute')
-                except:
-                    action = 'execute'
-                
-                if action == 'execute':
-                    if tagui_runner.execution_status["running"]:
-                        response = {
-                            'status': 'running',
-                            'message': '脚本正在执行中，请稍等...',
-                            'current_method': tagui_runner.execution_status["method"]
-                        }
-                    else:
-                        # 启动异步执行
-                        thread = threading.Thread(target=tagui_runner.execute_async)
-                        thread.daemon = True
-                        thread.start()
-                        
-                        response = {
-                            'status': 'started',
-                            'message': 'TagUI脚本已开始执行（异步）',
-                            'note': '脚本正在后台运行，请等待完成'
-                        }
-                
-                elif action == 'status':
-                    response = {
-                        'status': 'running' if tagui_runner.execution_status["running"] else 'idle',
-                        'message': tagui_runner.execution_status["message"],
-                        'method': tagui_runner.execution_status["method"]
-                    }
-                
-                else:
-                    response = {
-                        'status': 'error',
-                        'message': f'未知操作: {action}'
-                    }
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                
-                try:
-                    self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
-                except ConnectionAbortedError:
-                    print("POST响应时连接中断")
-                    return
-                
-            except ConnectionAbortedError:
-                print("POST请求处理时连接中断")
-                return
-            except Exception as e:
-                print(f"处理请求时发生错误: {str(e)}")
-                response = {
-                    'status': 'error',
-                    'message': f'服务器错误: {str(e)}'
-                }
-                
-                try:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
-                except:
-                    # 如果发送错误响应也失败，静默处理
-                    pass
-        else:
-            super().do_POST()
-    
-    def do_OPTIONS(self):
-        try:
-            self.send_response(200)
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-            self.end_headers()
-        except ConnectionAbortedError:
-            print("OPTIONS响应时连接中断")
-            return
+            # 清空tagui_runner的PDF文件列表
+            tagui_runner.execution_status["pdf_files"] = []
+            print("   🔄 已清空PDF文件列表缓存")
+            
+            return jsonify({
+                "success": True,
+                "message": "解压文件目录已清空",
+                "deleted_files": deleted_files,
+                "deleted_dirs": deleted_dirs
+            }), 200
+            
         except Exception as e:
-            print(f"OPTIONS请求处理错误: {e}")
-            return
+            error_msg = f"清空文件夹时发生错误: {str(e)}"
+            print(f"   ❌ {error_msg}")
+            return jsonify({
+                "success": False,
+                "message": error_msg
+            }), 500
+    else:
+        print("   ❌ 解压文件目录不存在")
+        return jsonify({
+            "success": False,
+            "message": "解压文件目录不存在"
+        }), 404
+
+# 状态查询
+@app.route('/status', methods=['GET'])
+def status():
+    return jsonify(tagui_runner.execution_status), 200
+
+# PDF预览
+@app.route('/preview-pdf', methods=['GET'])
+def preview_pdf():
+    pdf_path = request.args.get('path')
+    if pdf_path:
+        pdf_full_path = Path("D:/辅助打证/test/extracted_files") / pdf_path
+        if pdf_full_path.exists() and pdf_full_path.suffix.lower() == '.pdf':
+            return send_file(pdf_full_path, mimetype='application/pdf')
+    return jsonify({"message": "PDF文件未找到"}), 404
+
+# 打印日志查询
+@app.route('/print-log', methods=['GET'])
+def print_log():
+    logs = db_manager.get_print_logs()
+    return jsonify({"success": True, "logs": logs}), 200
+
+# 执行TagUI脚本
+@app.route('/execute-tagui', methods=['POST'])
+def execute_tagui():
+    try:
+        tagui_runner.execute_async()
+        return jsonify({"status": "started"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# 根路径处理，返回前端页面
+@app.route('/', methods=['GET'])
+def home():
+    return app.send_static_file('index.html')
 
 if __name__ == "__main__":
     PORT = 8000
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     
-    with socketserver.TCPServer(("", PORT), CustomHTTPRequestHandler) as httpd:
-        print(f"🚀 TagUI后端服务器启动在 http://localhost:{PORT}")
-        print("� 请在浏览器中访问 http://localhost:8000/index.html")
-        print("⭐ 支持的API端点:")
-        print("   POST /execute-tagui - 执行TagUI脚本")
-        print("   GET  /             - 访问前端页面")
-        print("📝 按 Ctrl+C 停止服务器")
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\n🛑 服务器已停止")
+    # 启动Flask服务器
+    app.run(port=PORT)
